@@ -1,0 +1,5 @@
+.stage{
+  position:fixed;
+  inset:0;
+  overflow:hidden;
+}

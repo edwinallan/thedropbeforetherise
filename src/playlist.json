@@ -1,0 +1,93 @@
+{
+    "chapters": [
+        {
+            "title": "Simplify me",
+            "start": "0:03.358"
+        },
+        {
+            "title": "Bellydance",
+            "start": "0:21.131"
+        },
+        {
+            "title": "Still Dreaming",
+            "start": "0:43.387"
+        },
+        {
+            "title": "Optimistic or Naive",
+            "start": "0:59.536"
+        }
+    ],
+    "items": [
+        {
+            "type": "background",
+            "start": "0:00:000",
+            "color": "#FFFFFF"
+        },
+        {
+            "type": "background",
+            "start": "0:03.384",
+            "color": "#000000",
+            "fadeIn": 500
+        },
+        {
+            "type": "background",
+            "start": "0:05.079",
+            "color": "#FFFFFF",
+            "fadeIn": 500
+        },
+        {
+            "type": "background",
+            "start": "0:14.049",
+            "color": "#000000",
+            "fadeIn": 500
+        },
+        {
+            "type": "audio",
+            "start": "0:01:000",
+            "duration": "1:29.056",
+            "file": "/assets/audio/full audio teaser_11.07.mp3",
+            "volume": 0.8
+        },
+        {
+            "type": "video",
+            "showOnMobile": true,
+            "file": "/assets/video/thedropbeforetherise/master.m3u8",
+            "start": "0:01:000",
+            "z": 3,
+            "height": 100,
+            "objectFit": "cover"
+        },
+        {
+            "type": "video",
+            "showOnMobile": false,
+            "file": "/assets/video/landscape/video_landscape.webm",
+            "start": "0:01:000",
+            "z": 2,
+            "height": 100,
+            "objectFit": "cover",
+            "edgeblur": 20
+        },
+        {
+            "type": "video",
+            "showOnMobile": false,
+            "file": "/assets/video/background/left.webm",
+            "start": "0:01:000",
+            "z": 1,
+            "height": 100,
+            "left": 0,
+            "width": 50,
+            "objectFit": "stretch"
+        },
+        {
+            "type": "video",
+            "showOnMobile": false,
+            "file": "/assets/video/background/right.webm",
+            "start": "0:01:000",
+            "z": 1,
+            "right": 0,
+            "width": 50,
+            "height": 100,
+            "objectFit": "stretch"
+        }
+    ]
+}
