@@ -32,6 +32,7 @@ export default function AudioLayer({ item, playhead, muted = false }) {
       src={item.file}
       preload="auto"
       muted={muted}            // ← this toggles actual sound
+      data-start-ms={toMs(item.start)}
     />
   );
 }

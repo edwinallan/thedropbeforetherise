@@ -8,6 +8,7 @@ import { toMs } from '../../utils/time';
 import playlist from '../../playlist.json';
 import { track } from '../../utils/analytics';
 import { getContrastColor } from '../../utils/colorUtils';
+import Outro from '../Outro/Outro';
 
 /**
  * Main Timeline player component.
@@ -15,24 +16,59 @@ import { getContrastColor } from '../../utils/colorUtils';
  * - OnClick anywhere in the stage (except inside any <button>), toggles “muted”.
  * - Passes muted={muted} down to every <AudioLayer>.
  */
-export default function Timeline({ onComplete }) {
+export default function Timeline({ onComplete, onReplay }) {
   const [time, setTime] = useState(0);
   const [isPlaying, setIsPlaying] = useState(true);
+  const [showOutroOverlay, setShowOutroOverlay] = useState(false);
+  // Total duration of the whole timeline (ms).  
+  // Will be determined from the actual media durations once their metadata loads.
+  const [totalDuration, setTotalDuration] = useState(0);
   const baseRef = useRef(performance.now());
   const rafRef = useRef();
 
-  // Compute total duration once
-  const totalDuration = React.useMemo(() => {
-    return playlist.items.reduce((max, item) => {
-      const start = toMs(item.start);
-      const dur = toMs(item.duration || 0);
-      return Math.max(max, start + dur);
-    }, 0);
+  // ─── Compute totalDuration from real media metadata ──────────────────────
+  useEffect(() => {
+    // When any media element reports its metadata, recalc the overall length.
+    const recompute = () => {
+      const mediaEls = document.querySelectorAll(
+        'video[data-start-ms], audio[data-start-ms]'
+      );
+      let max = 0;
+      mediaEls.forEach((el) => {
+        const startMs = parseFloat(el.getAttribute('data-start-ms')) || 0;
+        const durMs =
+          isNaN(el.duration) || !isFinite(el.duration)
+            ? 0
+            : el.duration * 1000; // seconds → ms
+        max = Math.max(max, startMs + durMs);
+      });
+      if (max > 0) setTotalDuration(max);
+    };
+
+    // Listen for duration‑related events.
+    const mediaEls = document.querySelectorAll(
+      'video[data-start-ms], audio[data-start-ms]'
+    );
+    mediaEls.forEach((el) => {
+      el.addEventListener('loadedmetadata', recompute);
+      el.addEventListener('durationchange', recompute);
+    });
+
+    // Initial attempt (covers already‑loaded metadata).
+    recompute();
+
+    return () => {
+      mediaEls.forEach((el) => {
+        el.removeEventListener('loadedmetadata', recompute);
+        el.removeEventListener('durationchange', recompute);
+      });
+    };
   }, []);
+  // ─────────────────────────────────────────────────────────────────────────
 
   // Start the “playhead” loop and send GA event
   useEffect(() => {
-    if (!isPlaying) return;
+    if (!isPlaying || totalDuration === 0) return;
 
     track('begin_playback', { totalDuration });
 
@@ -85,7 +121,14 @@ export default function Timeline({ onComplete }) {
     track('seek', { percent: (clamped / totalDuration) * 100 });
 
     // Re‑sync media
-    document.querySelectorAll('video, audio').forEach((el) => el.pause());
+    document.querySelectorAll('video, audio').forEach((el) => {
+      el.pause();
+      const startMs = parseFloat(el.getAttribute('data-start-ms')) || 0;
+      const seekSec = (clamped - startMs) / 1000;
+      if (!isNaN(seekSec) && seekSec >= 0 && seekSec <= el.duration) {
+        el.currentTime = seekSec;
+      }
+    });
     if (isPlaying) {
       setTimeout(() => {
         document.querySelectorAll('video, audio').forEach((el) =>
@@ -140,6 +183,12 @@ export default function Timeline({ onComplete }) {
     }
   });
 
+  useEffect(() => {
+    if (totalDuration > 0 && time >= totalDuration - 2000 && !showOutroOverlay) {
+      setShowOutroOverlay(true);
+    }
+  }, [time, totalDuration, showOutroOverlay]);
+
   return (
     // Attach `onClick` to the stage itself
     <div className={styles.stage} onClick={handleClick}>
@@ -151,6 +200,11 @@ export default function Timeline({ onComplete }) {
         barColor={contrastBarColor}
         onSeek={handleSeek}
       />
+      {showOutroOverlay && (
+        <div className={styles.outroOverlay}>
+          <Outro onReplay={onReplay} />
+        </div>
+      )}
     </div>
   );
 }

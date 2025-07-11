@@ -75,7 +75,9 @@ export default function App() {
       {phase === 'landing' && (
         <Landing onStart={handleStart} canPlay={canPlay} loadingError={loadingError} />
       )}
-      {phase === 'timeline' && <Timeline onComplete={handleEnd} />}
+      {phase === 'timeline' && (
+        <Timeline onComplete={handleEnd} onReplay={handleReplay} />
+      )}
       {phase === 'outro' && <Outro onReplay={handleReplay} />}
     </>
   );
