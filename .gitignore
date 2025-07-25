@@ -1,3 +1,7 @@
+#media
+public/assets/*
+
+
 # Logs
 logs
 *.log

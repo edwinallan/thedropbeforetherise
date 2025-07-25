@@ -1,0 +1,10 @@
+.bg{
+  position:fixed;
+  inset:0;
+  transition:opacity 500ms linear;
+  animation:fade 500ms forwards;
+}
+@keyframes fade{
+  from{opacity:0;}
+  to{opacity:1;}
+}
