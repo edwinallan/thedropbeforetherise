@@ -1,10 +1,11 @@
+// src/App.jsx
 import React, { useState, useEffect } from "react";
 import Landing from "./components/Landing/Landing";
 import Timeline from "./components/Timeline/Timeline";
 import Outro from "./components/Outro/Outro";
 import playlist from "./playlist.json";
 // import of old video loader removed; using HLS first-segment loader instead
-import { preloadAsset } from "./utils/assetLoader";
+import { preloadProgressiveVideo } from "./utils/assetLoader";
 import { preloadAudio } from "./utils/audioLoader";
 import { prewarmHls, pickFinalUrl } from "./utils/hlsLoader";
 
@@ -12,18 +13,14 @@ export default function App() {
   const [phase, setPhase] = useState("landing"); // 'landing' | 'timeline' | 'outro'
   const [canPlay, setCanPlay] = useState(false);
   const [loadingError, setLoadingError] = useState(false);
-  const [showEarlyOutro, setShowEarlyOutro] = useState(false);
 
   const handleStart = () => {
-    setShowEarlyOutro(false);
     setPhase("timeline");
   };
   const handleEnd = () => setPhase("outro");
   const handleReplay = () => {
-    setShowEarlyOutro(false);
     setPhase("timeline");
   };
-  const handleEarlyOutro = () => setShowEarlyOutro(true);
 
   useEffect(() => {
     let isCancelled = false;
@@ -47,14 +44,18 @@ export default function App() {
 
           switch (item.type) {
             case "video": {
-              // Prewarm HLS with the SAME picked URL as VideoLayer
+              // Prewarm HLS for .m3u8 and preload progressive MP4s using a hidden <video>
               promises.push(
                 (async () => {
                   const url = await pickFinalUrl(item, mobileDevice);
                   if (/\.m3u8$/i.test(url)) {
                     await prewarmHls(url, 5);
                   } else if (url) {
-                    await preloadAsset(url);
+                    const fullUrl =
+                      url.startsWith("http") || url.startsWith("/")
+                        ? url
+                        : `/${url}`;
+                    await preloadProgressiveVideo(fullUrl);
                   }
                 })()
               );
@@ -115,12 +116,7 @@ export default function App() {
       )}
       {phase === "timeline" && (
         <>
-          <Timeline
-            onComplete={handleEnd}
-            onReplay={handleReplay}
-            onOutroEarly={handleEarlyOutro}
-          />
-          {showEarlyOutro && <Outro onReplay={handleReplay} />}
+          <Timeline onComplete={handleEnd} onReplay={handleReplay} />
         </>
       )}
       {phase === "outro" && <Outro onReplay={handleReplay} />}

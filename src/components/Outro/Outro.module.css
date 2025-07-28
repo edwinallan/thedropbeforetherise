@@ -31,9 +31,17 @@
   border-radius: 2px;
   text-decoration: none;
 }
-.icons {
+.links {
   display: flex;
   gap: 1.5rem;
+}
+/* Remove default link color and underline */
+.links a,
+.links a:visited,
+.links a:hover,
+.links a:active {
+  color: inherit;
+  text-decoration: none;
 }
 @media (max-width: 599px) {
   .panel {

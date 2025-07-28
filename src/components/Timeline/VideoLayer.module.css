@@ -1,11 +1,17 @@
 .video {
+  /* …your existing rules… */
   position: fixed;
   top: 0;
   left: 50%;
   transform: translateX(-50%);
   height: 100%;
   width: auto;
-  /* No object-fit: we use exact dimensions */
+  background: transparent;
+
+  /* crop 1px from the right */
+  clip-path: inset(0 1px 0 0);
+  /* vendor-prefix for Safari if needed */
+  -webkit-clip-path: inset(0 1px 0 0);
 }
 @keyframes fadeIn {
   to {

@@ -1,47 +1,13 @@
 // src/utils/hlsLoader.js
 import Hls from "hls.js";
 
-let _hevcSupport = undefined;
 const warmed = new Set();
 
 // Shared helpers so App.jsx and VideoLayer.jsx pick EXACTLY the same URL
-export async function supportsHevc() {
-  if (_hevcSupport !== undefined) return _hevcSupport;
-  let supported = false;
-  if (navigator.mediaCapabilities && navigator.mediaCapabilities.decodingInfo) {
-    try {
-      const info = await navigator.mediaCapabilities.decodingInfo({
-        type: "file",
-        video: {
-          contentType: 'video/mp4; codecs="hvc1"',
-          width: 1920,
-          height: 1080,
-          bitrate: 8000000,
-          framerate: 30,
-        },
-      });
-      supported = !!info.supported;
-    } catch (_) {}
-  }
-  if (!supported) {
-    const v = document.createElement("video");
-    supported =
-      v.canPlayType('video/mp4; codecs="hvc1"') !== "" ||
-      v.canPlayType('video/mp4; codecs="hev1"') !== "";
-  }
-  _hevcSupport = supported;
-  return supported;
-}
-
-export async function pickFinalUrl(item, isMobile) {
+export function pickFinalUrl(item, isMobile) {
   const baseUrl = isMobile
     ? item.fileMobile || item.file
     : item.fileDesktop || item.file;
-
-  const hevcOk = item.fileHevc ? await supportsHevc() : false;
-
-  if (hevcOk && item.fileHevc) return item.fileHevc;
-  if (item.fileH264) return item.fileH264;
   return baseUrl;
 }
 

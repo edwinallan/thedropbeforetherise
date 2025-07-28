@@ -3,13 +3,11 @@
 import React, { useEffect, useRef, useState } from "react";
 import styles from "./Timeline.module.css";
 import ProgressBar from "./ProgressBar";
-import BackgroundLayer from "./BackgroundLayer";
+// import BackgroundLayer from "./BackgroundLayer";  <-- REMOVED
 import VideoLayer from "./VideoLayer";
-import AudioLayer from "./AudioLayer";
 import { toMs } from "../../utils/time";
 import playlist from "../../playlist.json";
 import { track } from "../../utils/analytics";
-import { getContrastColor } from "../../utils/colorUtils";
 import Outro from "../Outro/Outro";
 
 /**
@@ -24,7 +22,7 @@ export default function Timeline({
   onOutroEarly = () => {},
 }) {
   const [time, setTime] = useState(0);
-  const [isPlaying, setIsPlaying] = useState(true);
+  const [isPlaying, setIsPlaying] = useState(false);
   const [showOutroOverlay, setShowOutroOverlay] = useState(false);
   // Show overlay when timeline is paused
   const [showPauseOverlay, setShowPauseOverlay] = useState(false);
@@ -35,13 +33,24 @@ export default function Timeline({
   const OUTRO_OFFSET_MS = 2000;
   // Prevent multiple early‑outro callbacks
   const [outroEarlyTriggered, setOutroEarlyTriggered] = useState(false);
+  // Show early outro overlay
+  const [showEarlyOutro, setShowEarlyOutro] = useState(false);
+  // Prevent multiple final outro triggers
+  const [finalOutroTriggered, setFinalOutroTriggered] = useState(false);
 
   // Global buffering gate: if any video stalls, we pause everything and show a loader
   const [bufferingCount, setBufferingCount] = useState(0);
   const isBuffering = bufferingCount > 0;
+  const [isScrubbing, setIsScrubbing] = useState(false);
+  const wasPlayingOnScrubRef = useRef(false);
+
+  const [replayToken, setReplayToken] = useState(0);
 
   const handleBufferingChange = React.useCallback((isBuf) => {
-    setBufferingCount((prev) => Math.max(0, prev + (isBuf ? 1 : -1)));
+    setBufferingCount((prev) => {
+      const next = Math.max(0, prev + (isBuf ? 1 : -1));
+      return next;
+    });
   }, []);
 
   const mediaRegistry = useRef([]); // { el, item, isMaster }
@@ -71,12 +80,17 @@ export default function Timeline({
     return () => window.removeEventListener("resize", onResize);
   }, []);
 
+  const isSafari = React.useMemo(() => {
+    const ua = typeof navigator === "undefined" ? "" : navigator.userAgent;
+    return /^((?!chrome|android).)*safari/i.test(ua);
+  }, []);
+
   // Compute total duration from real media metadata without querying the DOM each time
   useEffect(() => {
     const recalc = () => {
       let max = 0;
-      mediaRegistry.current.forEach(({ el, item }) => {
-        const startMs = toMs(item.start);
+      mediaRegistry.current.forEach(({ el, item, isMaster }) => {
+        const startMs = isMaster ? toMs(item.start) : 0;
         const durMs =
           isNaN(el.duration) || !isFinite(el.duration) ? 0 : el.duration * 1000;
         max = Math.max(max, startMs + durMs);
@@ -129,6 +143,7 @@ export default function Timeline({
         });
 
         setIsReady(true);
+        setIsPlaying(true);
       }
     );
   }, [isReady]);
@@ -144,6 +159,25 @@ export default function Timeline({
     rafId = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(rafId);
   }, [isPlaying, getPlayheadMs]);
+
+  // Periodically resync all media elements to the master playhead
+  useEffect(() => {
+    if (!isPlaying) return;
+    mediaRegistry.current.forEach(({ el, item }) => {
+      const startMs = toMs(item.start);
+      const endMs = item.duration
+        ? startMs + toMs(item.duration)
+        : totalDuration;
+      if (time >= startMs && time < endMs) {
+        const desiredSec = (time - startMs) / 1000;
+        if (Math.abs(el.currentTime - desiredSec) > 0.05) {
+          try {
+            el.currentTime = desiredSec;
+          } catch {}
+        }
+      }
+    });
+  }, [time, isPlaying, totalDuration]);
 
   // Auto-pause everything while any video is buffering, resume when it clears
   useEffect(() => {
@@ -161,9 +195,95 @@ export default function Timeline({
     }
   }, [isBuffering, isPlaying]);
 
+  // Reset and replay the entire timeline
+  const handleTimelineReplay = () => {
+    console.log(
+      "[Timeline] Replaying timeline: registry size=",
+      mediaRegistry.current.length
+    );
+    // Pause everything first
+    mediaRegistry.current.forEach(({ el, item, isMaster }) => {
+      try {
+        console.log("[Timeline] pausing", {
+          start: item.start,
+          isMaster,
+          currentTime: el.currentTime,
+        });
+        el.pause();
+        console.log("[Timeline] paused", {
+          start: item.start,
+          isMaster,
+          currentTime: el.currentTime,
+        });
+      } catch (err) {
+        console.warn(
+          "[Timeline] pause() failed for",
+          { start: item.start, isMaster },
+          err
+        );
+      }
+    });
+
+    // Seek each element back to its start-relative time (master to 0s; others to 0 to avoid showing last frame)
+    mediaRegistry.current.forEach(({ el, item, isMaster }) => {
+      const startMs = toMs(item.start);
+      const desired = isMaster ? 0 : 0; // keep non-master at 0; they'll stay paused until their window
+      try {
+        const before = el.currentTime;
+        el.currentTime = desired;
+        console.log("[Timeline] seek", {
+          start: item.start,
+          isMaster,
+          before,
+          after: el.currentTime,
+        });
+      } catch (err) {
+        console.error(
+          "[Timeline] error seeking",
+          { start: item.start, isMaster },
+          err
+        );
+      }
+    });
+
+    // Reset UI state and overlays
+    setTime(0);
+    setShowPauseOverlay(false);
+    setShowOutroOverlay(false);
+    setIsPlaying(true);
+
+    // Bump token to let VideoLayers reset their internal flags (e.g., playedRef)
+    setReplayToken((n) => n + 1);
+
+    // Start only the master; others will start when their window opens
+    const master = masterElRef.current;
+    if (master) {
+      // Defer play until after the current tick so currentTime writes settle
+      setTimeout(() => {
+        console.log("[Timeline] playing master", {
+          currentTime: master.currentTime,
+        });
+        master
+          .play()
+          .then(() => {
+            console.log("[Timeline] master playing from", master.currentTime);
+            // now notify parent that replay has occurred
+            if (typeof onReplay === "function") {
+              onReplay();
+            }
+          })
+          .catch((err) =>
+            console.error("[Timeline] master play() failed", err)
+          );
+      }, 0);
+    } else {
+      console.warn("[Timeline] No master element registered");
+    }
+  };
+
   // Handle anywhere‑click on the stage: toggle play/pause
   const handleClick = (e) => {
-    if (e.target.closest("button")) return;
+    if (e.target.closest("button") || e.target.closest("a")) return;
 
     if (isPlaying) {
       // Pause playback and show overlay
@@ -187,6 +307,32 @@ export default function Timeline({
   };
 
   // Seek to a specific moment (ms) – used by ProgressBar scrubbing
+  const handleScrubStart = React.useCallback(() => {
+    wasPlayingOnScrubRef.current = isPlaying;
+    if (isPlaying) {
+      mediaRegistry.current.forEach(({ el }) => {
+        try {
+          el.pause();
+        } catch {}
+      });
+      setIsPlaying(false);
+    }
+    setShowPauseOverlay(false);
+    setIsScrubbing(true);
+  }, [isPlaying]);
+
+  const handleScrubEnd = React.useCallback(() => {
+    setIsScrubbing(false);
+    if (wasPlayingOnScrubRef.current) {
+      mediaRegistry.current.forEach(({ el }) => {
+        try {
+          el.play().catch(() => {});
+        } catch {}
+      });
+      setIsPlaying(true);
+    }
+  }, []);
+
   const handleSeek = (ms) => {
     // Hide pause overlay when scrubbing
     setShowPauseOverlay(false);
@@ -216,18 +362,6 @@ export default function Timeline({
     } else if (showOutroOverlay) {
       setShowOutroOverlay(false);
     }
-
-    // Auto‑resume timeline if it was paused
-    if (!isPlaying) {
-      setIsPlaying(true);
-    }
-
-    // Ensure all media resume playing after the seek
-    setTimeout(() => {
-      mediaRegistry.current.forEach(({ el }) => {
-        el.play().catch(() => {});
-      });
-    }, 0);
   };
 
   // Determine current background color from playlist items
@@ -249,28 +383,27 @@ export default function Timeline({
     return latest.color;
   }, [time]);
 
-  // Compute contrast color for the progress bar
-  const contrastBarColor = React.useMemo(
-    () => getContrastColor(currentBgColor),
-    [currentBgColor]
-  );
-
   const filteredItems = React.useMemo(() => {
-    return playlist.items.filter((item) => {
-      if (item.type !== "video") return true; // keep backgrounds/webm videos as they already specify showOnMobile
-      // Only keep the HLS variant that matches the device
-      return isMobile
-        ? item.showOnMobile === true
-        : item.showOnMobile === false;
-    });
+    // Exclude background items; filter videos by device
+    return playlist.items
+      .filter((item) => item.type !== "background")
+      .filter((item) => {
+        if (item.type !== "video") return true;
+        return isMobile
+          ? item.showOnMobile === true
+          : item.showOnMobile === false;
+      });
   }, [isMobile]);
 
+  let firstVideo = true;
   let firstAudio = true;
   const layers = filteredItems.map((item, idx) => {
     switch (item.type) {
-      case "background":
-        return <BackgroundLayer key={idx} item={item} playhead={time} />;
-      case "video":
+      // case "background":
+      //   return <BackgroundLayer key={idx} item={item} playhead={time} />;
+      case "video": {
+        const isMasterVideo = firstVideo;
+        if (firstVideo) firstVideo = false;
         return (
           <VideoLayer
             key={idx}
@@ -279,24 +412,9 @@ export default function Timeline({
             registerMedia={registerMedia}
             getPlayheadMs={getPlayheadMs}
             onBufferingChange={handleBufferingChange}
-          />
-        );
-      case "audio": {
-        const isMaster = firstAudio;
-        if (firstAudio) firstAudio = false;
-        return (
-          <AudioLayer
-            key={idx}
-            item={item}
-            playhead={time}
-            muted={false}
-            isMaster={isMaster}
-            registerMedia={registerMedia}
-            qualityUrls={{
-              low: item.low,
-              medium: item.medium,
-              high: item.high,
-            }}
+            isMaster={isMasterVideo}
+            forceHlsJs={isSafari}
+            replayToken={replayToken}
           />
         );
       }
@@ -306,67 +424,83 @@ export default function Timeline({
   });
 
   useEffect(() => {
-    if (totalDuration > 0 && time >= totalDuration - OUTRO_OFFSET_MS) {
+    const outroWindow =
+      totalDuration > 0 && time >= totalDuration - OUTRO_OFFSET_MS;
+    if (outroWindow) {
+      // Show final overlay
       if (!showOutroOverlay) {
         setShowOutroOverlay(true);
+        if (!finalOutroTriggered) {
+          setFinalOutroTriggered(true);
+          onComplete(); // notify parent to transition to outro
+        }
       }
+      // Show early overlay only if before final trigger
       if (!outroEarlyTriggered) {
         setOutroEarlyTriggered(true);
-        onOutroEarly(); // inform parent (App) that we're in the outro window
+        setShowEarlyOutro(true);
       }
-    } else if (outroEarlyTriggered && time < totalDuration - OUTRO_OFFSET_MS) {
-      // If the user scrubbed back before the window, reset so it can fire again
-      setOutroEarlyTriggered(false);
+    } else {
+      // Reset if scrubbing back
+      if (outroEarlyTriggered) {
+        setOutroEarlyTriggered(false);
+        setShowEarlyOutro(false);
+      }
+      if (finalOutroTriggered) {
+        setFinalOutroTriggered(false);
+      }
+      if (showOutroOverlay) {
+        setShowOutroOverlay(false);
+      }
     }
   }, [
     time,
     totalDuration,
     showOutroOverlay,
     outroEarlyTriggered,
-    onOutroEarly,
+    finalOutroTriggered,
+    onComplete,
   ]);
 
   return (
     // Attach `onClick` to the stage itself
     <div className={styles.stage} onClick={handleClick}>
+      <div
+        className={styles.background}
+        style={{
+          position: "fixed",
+          inset: 0,
+          background: currentBgColor,
+          zIndex: 0,
+          transition: "background 500ms linear",
+        }}
+      />
       {layers}
       <ProgressBar
         time={time}
         total={totalDuration}
         chapters={playlist.chapters}
-        barColor={contrastBarColor}
+        bgColor={currentBgColor}
         onSeek={handleSeek}
+        onScrubStart={handleScrubStart}
+        onScrubEnd={handleScrubEnd}
       />
+      {showEarlyOutro && !showPauseOverlay && !showOutroOverlay && (
+        <div className={styles.pauseOverlay}>
+          <Outro onReplay={handleTimelineReplay} showReplay={true} />
+        </div>
+      )}
       {showPauseOverlay && !showOutroOverlay && (
         <div className={styles.pauseOverlay}>
-          <Outro onReplay={onReplay} showReplay={false} />
+          <Outro onReplay={handleTimelineReplay} showReplay={false} />
         </div>
       )}
       {showOutroOverlay && (
         <div className={styles.outroOverlay}>
-          <Outro onReplay={onReplay} />
+          <Outro onReplay={handleTimelineReplay} showReplay={true} />
         </div>
       )}
-      {isBuffering && (
-        <div
-          style={{
-            position: "fixed",
-            top: 0,
-            left: 0,
-            width: "100vw",
-            height: "100vh",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            background: "rgba(0,0,0,0.6)",
-            color: "#fff",
-            fontSize: "18px",
-            zIndex: 9999,
-          }}
-        >
-          Loading…
-        </div>
-      )}
+      {isBuffering && <div className={styles.loadingOverlay}>Loading…</div>}
     </div>
   );
 }
